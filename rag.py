@@ -60,6 +60,11 @@ class Settings:
             raise ValueError(f"Missing environment variables: {', '.join(missing)}")
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("CHUNK_OVERLAP must be smaller than CHUNK_SIZE")
+        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,43}[a-z0-9])?", self.index_name):
+            raise ValueError(
+                "PINECONE_INDEX_NAME must contain only lowercase letters, numbers, "
+                "and hyphens, and must not begin or end with a hyphen"
+            )
 
 
 def read_documents(folder: Path) -> Iterator[tuple[str, int, str]]:
@@ -154,8 +159,13 @@ class RAGService:
 
         first_vectors = self._embed([record[1] for record in records[:batch_size]])
         index = self._ensure_index(len(first_vectors[0]))
-        # Re-indexing is deterministic and removes stale chunks from this namespace.
-        index.delete(delete_all=True, namespace=self.settings.namespace)
+        # Re-indexing is deterministic and removes stale chunks. A newly created
+        # index has no namespaces yet, and Pinecone returns 404 if asked to delete
+        # a namespace that does not exist.
+        stats = index.describe_index_stats()
+        namespaces = stats.namespaces or {}
+        if self.settings.namespace in namespaces:
+            index.delete(delete_all=True, namespace=self.settings.namespace)
         for offset in range(0, len(records), batch_size):
             batch = records[offset : offset + batch_size]
             vectors = first_vectors if offset == 0 else self._embed([record[1] for record in batch])
@@ -166,6 +176,12 @@ class RAGService:
         return len(records)
 
     def ask(self, question: str) -> tuple[str, list[dict]]:
+        names = [item.name for item in self.pc.list_indexes()]
+        if self.settings.index_name not in names:
+            raise ValueError(
+                f"Pinecone index '{self.settings.index_name}' does not exist. "
+                "Click 'Index / refresh documents' before asking a question."
+            )
         vector = self._embed([question])[0]
         index = self.pc.Index(self.settings.index_name)
         result = index.query(
@@ -195,4 +211,3 @@ class RAGService:
             temperature=0.1,
         )
         return response.choices[0].message.content or "No answer returned.", sources
-

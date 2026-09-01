@@ -1,8 +1,13 @@
+from pathlib import Path
+
 from dotenv import load_dotenv
 import streamlit as st
 from rag import RAGService, Settings
 
-load_dotenv()
+# Streamlit reruns this module in a long-lived process. Override stale values that
+# may have been loaded from an earlier version of .env, and resolve the file
+# relative to this application rather than the terminal's working directory.
+load_dotenv(dotenv_path=Path(__file__).with_name(".env"), override=True)
 st.set_page_config(page_title="Claims RAG", page_icon="🔎")
 st.title("Claims document assistant")
 st.caption("Grounded answers from the supplied PDF and DOCX claim files.")
@@ -17,7 +22,12 @@ except Exception as exc:
 
 with st.sidebar:
     st.subheader("Knowledge base")
-    st.code(f"{settings.index_name}\nnamespace: {settings.namespace}", language=None)
+    st.code(
+        f"{settings.index_name}\n"
+        f"namespace: {settings.namespace}\n"
+        f"embeddings: {settings.embedding_model}",
+        language=None,
+    )
     if st.button("Index / refresh documents", type="primary", use_container_width=True):
         with st.spinner("Extracting, embedding, and indexing..."):
             try:
